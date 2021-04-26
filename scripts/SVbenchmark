@@ -350,7 +350,7 @@ sub write_fp_fn_variants {
 
     DEBUG("Opening falsepositive file");
     my $fp_fh = Open("$prefix.falsepositives.vcf", "w");
-    my $tp_comp = Open("$prefix.truepositives-comp.vcf", "w");
+    my $tp_comp = Open("$prefix.truepositives_comp.vcf", "w");
 
     # find fp's, fn's:
 
@@ -413,7 +413,7 @@ sub write_fp_fn_variants {
     close $test_vcf_fh;
 
     my $fn_fh = Open("$prefix.falsenegatives.vcf", "w");
-    my tp_base = Open("$prefix.truepozitifes_base.vcf", "w");
+    my $tp_base = Open("$prefix.truepositives_base.vcf", "w");
 
     my $truth_command = construct_variant_command($truth_vcf, $bedfile, $truth_filter);
     DEBUG($truth_command);
