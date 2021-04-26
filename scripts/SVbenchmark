@@ -453,7 +453,7 @@ sub write_fp_fn_variants {
                 }
 
                 if ($no_test_matches) {
-                    $tp_base $vcf_line;
+                    print $tp_base $vcf_line;
                     $no_detectedtruepositives++;
                 }
             }
