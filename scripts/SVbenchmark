@@ -74,8 +74,6 @@ if ($include_bed) {
 
 my $max_distance = $Opt{'maxdist'};
 my $min_size = $Opt{'minsize'};
-my $min_readsupport = $Opt{'minreadsupport'};
-my $min_readfrac = $Opt{'minreadfrac'};
 my $normshift = $Opt{'normshift'};
 my $normsizediff = $Opt{'normsizediff'};
 my $normdist = $Opt{'normdist'};
@@ -117,8 +115,8 @@ WARN("Done");
 
 sub process_commandline {
     # Set defaults here
-    %Opt = ( maxdist => 50000, prefix => 'benchmark', normshift => 0.2, normsizediff => 0.2, normdist => 0.2 );
-    GetOptions(\%Opt, qw( ref=s test=s truth=s maxdist=i minsize=i minreadsupport=i minreadfrac=f prefix=s includebed=s distance_file=s testfilter=s truthfilter=s normshift=f normsizediff=f normdist=f newdist max_subs_rate=f max_indel_rate=f nocleanup manual help+ version verbose debug)) || pod2usage(0);
+    %Opt = ( maxdist => 100000, prefix => 'benchmark', normshift => 1.0, normsizediff => 1.0, normdist => 1.0 );
+    GetOptions(\%Opt, qw( ref=s test=s truth=s maxdist=i minsize=i prefix=s includebed=s distance_file=s testfilter=s truthfilter=s normshift=f normsizediff=f normdist=f nocleanup manual help+ version verbose debug)) || pod2usage(0);
     if ($Opt{manual})  { pod2usage(verbose => 2); }
     if ($Opt{help})    { pod2usage(verbose => $Opt{help}-1); }
     if ($Opt{version}) { die "SVbenchmark.pl, ", q$Revision:$, "\n"; }
@@ -132,16 +130,14 @@ sub calculate_distance_matrix {
     my $bedfile = shift;
 
     my $distance_file = "$prefix.distances";
-    my $dist_fh = Open($distance_file, "w");
+    my $distance_fh = Open($distance_file, "w");
 
-    print $dist_fh "DIST\tID1\tID2\tAVGALTLENGTH\tALTLENGTHDIFF\tAVGSIZE\tSIZEDIFF\tEDITDIST\tMAXSHIFT\tPOSDIFF\tRELSHIFT\tRELSIZEDIFF\tRELDIST\tNOSUBS\tNOINDELS\tMAR\tSUBSDIST\tINDELDIST\n";
+    print $distance_fh "DIST\tID1\tID2\tAVGALTLENGTH\tALTLENGTHDIFF\tAVGSIZE\tSIZEDIFF\tEDITDIST\tMAXSHIFT\tPOSDIFF\tRELSHIFT\tRELSIZEDIFF\tRELDIST\n";
 
     my $test_command = construct_variant_command($test_vcf, $bedfile, $test_filter);
     my $test_sortedvcf_fh = Open("$test_command");
-    INFO("Test command: $test_command");
 
     my $truth_command = construct_variant_command($truth_vcf, $bedfile, $truth_filter);
-    INFO("Truth command: $truth_command");
     my $true_sortedvcf_fh = Open("$truth_command");
 
     my $rh_current_last_sv; # to check for sorting
@@ -155,17 +151,17 @@ sub calculate_distance_matrix {
     my ($current_test_id, $current_truth_id) = (1, 1);
     while (my $rh_testsv = retrieve_next_sorted_sv($test_sortedvcf_fh, $ref_db)) {
   
+        if (!($rh_testsv->{id}) || ($rh_testsv->{id} eq '.') ) { # assign sequential
+            $rh_testsv->{id} = "testsv_".$current_test_id;
+            $current_test_id++;
+        } 
         my $test_chrom = $rh_testsv->{chrom} || ''; 
         my $test_pos = $rh_testsv->{pos} || ''; 
         my $test_end = $rh_testsv->{end} || ''; 
         if ((!($test_chrom)) || (!($test_pos)) || (!($test_end))) {
+            INFO("Skipping $rh_testsv->{id} with chrom $test_chrom pos $test_pos end $test_end");
             next;
         }
-
-        if (!(defined($rh_testsv->{id})) || ($rh_testsv->{id} eq '.') ) { # assign sequential
-            $rh_testsv->{id} = "testsv_".$current_test_id;
-            $current_test_id++;
-        } 
         $total_test_svs++;
    
         # be sure @current_neighborhood_true_svs contains only nearby true SVs by deleting if necessary: 
@@ -186,14 +182,14 @@ sub calculate_distance_matrix {
             INFO("Adding to true variants in window for test variant $rh_testsv->{id}");
             my $rh_nexttruesv = retrieve_next_sorted_sv($true_sortedvcf_fh, $ref_db);
             last if (!$rh_nexttruesv);
+            if (!($rh_nexttruesv->{id}) || ($rh_nexttruesv->{id} eq '.') ) { # assign sequential
+                $rh_nexttruesv->{id} = "truesv_".$current_truth_id;
+                $current_truth_id++;
+            } 
             my $truth_chrom = $rh_nexttruesv->{chrom}; 
             my $truth_pos = $rh_nexttruesv->{pos}; 
             my $truth_end = $rh_nexttruesv->{end}; 
             next if ((!($truth_chrom)) || (!($truth_pos)) || (!($truth_end)));
-            if (!(defined($rh_nexttruesv->{id})) || ($rh_nexttruesv->{id} eq '.') ) { # assign sequential
-                $rh_nexttruesv->{id} = "truesv_".$current_truth_id;
-                $current_truth_id++;
-            } 
             $total_true_svs++;
 
             push @current_neighborhood_true_svs, $rh_nexttruesv;
@@ -211,7 +207,7 @@ sub calculate_distance_matrix {
             if (($rh_truesv->{chrom} eq $rh_testsv->{chrom}) && 
                   (abs($rh_testsv->{pos} - $rh_truesv->{pos}) <= $max_distance) &&
                   ($comp_obj->potential_match())) {
-                my $rh_distance_metrics = $comp_obj->calc_distance('-nocleanup' => $Opt{'nocleanup'}, '-printdist' => $dist_fh);
+                my $rh_distance_metrics = $comp_obj->calc_distance('-nocleanup' => $Opt{'nocleanup'});
                 if (!(defined($rh_distance_metrics->{'edit_distance'}))) {
                     WARN("Skipping comparison of $rh_truesv->{id} and $rh_testsv->{id} due to invalid coordinates.");
                     next;
@@ -224,12 +220,6 @@ sub calculate_distance_matrix {
                 my $size_diff = $rh_distance_metrics->{'size_diff'};
                 my $size_avg = $rh_distance_metrics->{'size_avg'};
                 my $shared_denominator = $rh_distance_metrics->{'shared_denominator'};
-                my $nds = $rh_distance_metrics->{'d_s'};
-                my $ndi = $rh_distance_metrics->{'d_i'};
-                my $mar = $rh_distance_metrics->{'max_affected_region_length'};
-                my $ds = $nds/$mar;
-                my $di = $ndi/$mar;
-    
     
                 # divide maximum shift by the minimum absolute size of the two variants:
                 my $d1 = abs($max_shift)/$shared_denominator;
@@ -239,7 +229,8 @@ sub calculate_distance_matrix {
                 my $d3 = abs($edit_dist)/$shared_denominator;
                 my $id1 = $rh_testsv->{id};
                 my $id2 = $rh_truesv->{id};
-                $distances{$id1}->{$id2} = ($Opt{'newdist'}) ? [$pos_diff, $ds, $di] : [$pos_diff, $d1, $d2, $d3];
+                print $distance_fh "DIST\t$id1\t$id2\t$altlength_avg\t$altlength_diff\t$size_avg\t$size_diff\t$edit_dist\t$max_shift\t$pos_diff\t$d1\t$d2\t$d3\n";
+                $distances{$id1}->{$id2} = [$pos_diff, $d1, $d2, $d3];
             }
             else {
                 INFO("No potential match for $rh_testsv->{id} and $rh_truesv->{id}");
@@ -247,18 +238,9 @@ sub calculate_distance_matrix {
         }
     }
 
-    WARN("Compared $total_test_svs test SVs to $total_true_svs truth set SVs");
-
-    if (!$total_test_svs) {
-        WARN("You are testing 0 test SVs. Perhaps you are using an inappropriate test filter or have a VCF file with unusual formatting.");
-    }
-    if (!$total_true_svs) {
-        WARN("You are testing 0 truth set SVs. Perhaps you are using an inappropriate truth set filter or have a VCF file with unusual formatting.");
-    }
-
     close $test_sortedvcf_fh;
     close $true_sortedvcf_fh;
-    close $dist_fh;
+    close $distance_fh;
     
     return {%distances};
 
@@ -293,8 +275,8 @@ sub read_distance_file {
     while (<$dist_fh>) {
         if (/^DIST/) {
             chomp;
-            my ($dummy, $id1, $id2, $altlength_avg, $altlength_diff, $size_avg, $size_diff, $edit_dist, $max_shift, $pos_diff, $d1, $d2, $d3, $nds, $ndi, $mar, $ds, $di) = split /\t/, $_;
-            $distances{$id1}->{$id2} = ($Opt{'newdist'}) ? [$pos_diff, $ds, $di] : [$pos_diff, $d1, $d2, $d3];
+            my ($dummy, $id1, $id2, $altlength_avg, $altlength_diff, $size_avg, $size_diff, $edit_dist, $max_shift, $pos_diff, $d1, $d2, $d3) = split /\t/, $_;
+            $distances{$id1}->{$id2} = [$pos_diff, $d1, $d2, $d3];
         }
     }
 
@@ -314,7 +296,7 @@ sub retrieve_next_sorted_sv {
     }
     chomp $next_line;
     if ($next_line =~ /^(\S+)\t(\d+)\t(\S+)\t(\S+)\t(\S+)\t(\S+)\t(\S+)\t(\S+)/) {
-        my ($chrom, $start, $id, $ref, $alt, $info, $format, $genotype) = ($1, $2, $3, $4, $5, $8, $9, $10);
+        my ($chrom, $start, $id, $ref, $alt, $info) = ($1, $2, $3, $4, $5, $8);
         $ref = uc($ref);
         $alt = uc($alt);
  
@@ -327,7 +309,7 @@ sub retrieve_next_sorted_sv {
             $end = $start + $reflength - 1;
         }
         elsif ($info =~ /SVTYPE=BND/ || $info =~ /SVTYPE=UNK/) {
-            INFO("Skipping type BND or UNK: $next_line");
+            WARN("Skipping type BND or UNK: $next_line");
             return {};
         }
         elsif (($alt eq '<DEL>') && ($info =~ /;END=(\d+);{0,1}/ || $info =~ /^END=(\d+);{0,1}/)) { # use end tag
@@ -335,15 +317,7 @@ sub retrieve_next_sorted_sv {
             my $smo = $start - 1;
             $ref = uc($ref_db->seq("$chrom:$smo-$end"));
             $alt = substr($ref, 0, 1); # first character of reference
-            $reflength = $end - $smo + 1;
-            $altlength = 1;
             INFO("Calculating sequence for deletion $id");
-        }
-        elsif (($alt eq '<INS>') && ($info =~ /;SEQ=([atgcnATGCN]+);{0,1}/ || $info =~ /^SEQ=([atgcnATGCN]+);{0,1}/)) { # use end tag
-            $alt = uc($1); # first character of reference
-            $end = $start + length($ref) - 1;
-            $altlength = length($alt);
-            INFO("Using sequence from SEQ tag for insertion $id");
         }
         else { # don't know how to handle this
             INFO("Skipping non-ATGC ref or alt record: $next_line");
@@ -353,8 +327,7 @@ sub retrieve_next_sorted_sv {
         return {'chrom' => $chrom, 'pos' => $start, 'start' => $start, 
                 'end' => $end, 'id' => $id, 'ref' => $ref,
                 'alt' => $alt, 'reflength' => $reflength, 
-                'altlength' => $altlength, 'format' => $format,
-                'genotype' => $genotype, 'vcf_line' => "$next_line\n"};
+                'altlength' => $altlength};
     }
     else {
         die "Unexpected VCF line:\n$next_line";
@@ -377,6 +350,7 @@ sub write_fp_fn_variants {
 
     DEBUG("Opening falsepositive file");
     my $fp_fh = Open("$prefix.falsepositives.vcf", "w");
+    my $tp_comp = Open("$prefix.truepositives-comp.vcf", "w");
 
     # find fp's, fn's:
 
@@ -387,31 +361,20 @@ sub write_fp_fn_variants {
 
     my ($current_test_id, $current_truth_id) = (1, 1);
     my $duplicates_warned = 1;
-
-    while (my $rh_testsv = retrieve_next_sorted_sv($test_vcf_fh, $ref_db)) {
-        my $next_vcf_line = $rh_testsv->{vcf_line};
-        next if (!$next_vcf_line);
-        if ($next_vcf_line =~ /^#/) { # header line--print to fp file:
-            print $fp_fh $next_vcf_line;
+    while (<$test_vcf_fh>) {
+        if (/^#/) { # header line--print to fp file:
+            print $fp_fh $_;
+            print $tp_comp $_;
         }
         else {
-            chomp $next_vcf_line;
-            my @fields = split /\t/, $next_vcf_line;
+            my $vcf_line = $_;
+            chomp;
+            my @fields = split /\t/, $_;
             my $test_id = $fields[2];
             if ($test_id eq '.') {
                 $test_id = "testsv_".$current_test_id;
                 $current_test_id++;
             }
-
-            # skip test variants with insufficient read support or read fraction if specified in the options:
-            if ($min_readsupport || $min_readfrac) {
-                my ($var_reads, $ref_reads) = retrieve_read_counts(@fields);
-                next if (!(defined($var_reads)));
-                next if ($min_readsupport && $var_reads < $min_readsupport);
-                next if (!(defined($ref_reads)));
-                next if ($min_readfrac && $ref_reads && $var_reads && $var_reads < $min_readfrac * $ref_reads);
-            }
-
             my $testsize = retrieve_variant_size(@fields);
             if (!($min_size) || ($testsize > $min_size) ) { # Tested prediction
                 my @matched_ids = ($rh_distances->{$test_id}) ?
@@ -419,26 +382,17 @@ sub write_fp_fn_variants {
                 my @true_positives = ();
                 foreach my $truth_id (@matched_ids) {
                     my @matchdistances = @{$rh_distances->{$test_id}->{$truth_id}};
-                    if ($Opt{'newdist'}) {
-                        if ($matchdistances[1] <= $Opt{'max_subs_rate'} &&
-                            $matchdistances[2] <= $Opt{'max_indel_rate'}) { # found a match--TP!
-                            push @true_positives, $truth_id;
-                            push @{$rh_truepositive_truth_ids->{$truth_id}}, $test_id;
-                        }
-                    }
-                    else {
-                        if ($matchdistances[1] <= $normshift &&
-                            $matchdistances[2] <= $normsizediff &&
-                            $matchdistances[3] <= $normdist) { # found a match--TP!
-                            push @true_positives, $truth_id;
-                            push @{$rh_truepositive_truth_ids->{$truth_id}}, $test_id;
-                        }
+                    if ($matchdistances[1] <= $normshift &&
+                        $matchdistances[2] <= $normsizediff &&
+                        $matchdistances[3] <= $normdist) { # found a match--TP!
+                        push @true_positives, $truth_id;
+                        push @{$rh_truepositive_truth_ids->{$truth_id}}, $test_id;
                     }
                 }
     
                 my $no_tps = @true_positives;
                 if (!($no_tps)) { # no match--FP!
-                    print $fp_fh "$next_vcf_line\n";
+                    print $fp_fh $vcf_line;
                     $no_falsepositives++;
                 }
                 elsif ($no_tps > 1) { # potential duplicates
@@ -448,31 +402,33 @@ sub write_fp_fn_variants {
                 }
     
                 if ($no_tps) {
+                    print $tp_comp $vcf_line;
                     $no_truepositives++;
                 }
             }
         }
     }
     close $fp_fh;
+    close $tp_comp;
     close $test_vcf_fh;
 
     my $fn_fh = Open("$prefix.falsenegatives.vcf", "w");
+    my tp_base = Open("$prefix.truepozitifes_base.vcf", "w");
 
     my $truth_command = construct_variant_command($truth_vcf, $bedfile, $truth_filter);
     DEBUG($truth_command);
 
     my $truth_vcf_fh = Open("$truth_command");
     $duplicates_warned = 0;
-    #while (<$truth_vcf_fh>) {
-    while (my $rh_truesv = retrieve_next_sorted_sv($truth_vcf_fh, $ref_db)) {
-        my $next_vcf_line = $rh_truesv->{vcf_line};
-        next if (!$next_vcf_line);
-        if ($next_vcf_line =~ /^#/) { # header line--print to fn file:
-            print $fn_fh "$next_vcf_line";
+    while (<$truth_vcf_fh>) {
+        if (/^#/) { # header line--print to fn file:
+            print $fn_fh $_;
+            print $tp_base $_;
         }
         else {
-            chomp $next_vcf_line;
-            my @fields = split /\t/, $next_vcf_line;
+            my $vcf_line = $_;
+            chomp;
+            my @fields = split /\t/, $_;
             my $truth_id = $fields[2];
             if ($truth_id eq '.') {
                 $truth_id = "truesv_".$current_truth_id;
@@ -487,7 +443,7 @@ sub write_fp_fn_variants {
                 my $no_test_matches = @test_matches;
     
                 if (!($no_test_matches)) { # missed--FN!
-                    print $fn_fh "$next_vcf_line\n";
+                    print $fn_fh $vcf_line;
                     $no_falsenegatives++;
                 }
                 elsif ($no_test_matches > 1) {
@@ -497,30 +453,32 @@ sub write_fp_fn_variants {
                 }
 
                 if ($no_test_matches) {
+                    $tp_base $vcf_line;
                     $no_detectedtruepositives++;
                 }
             }
         }
     }
     close $fn_fh;
+    close $tp_base;
     close $truth_vcf_fh;
 
     # print summary statistics:
     print $output_fh "RECALL:\n";
     print $output_fh "Number of detected true variants (DTP): $no_detectedtruepositives\n";
     print $output_fh "Number of undetected true variants (FN): $no_falsenegatives\n";
-    my $recallval = ($no_detectedtruepositives + $no_falsenegatives) ? $no_detectedtruepositives/($no_detectedtruepositives+$no_falsenegatives) : 'NaN';
-    my $recall = ($recallval eq 'NaN' ) ? $recallval : sprintf("%5.2f", 100*$recallval);
+    my $recallval = ($no_detectedtruepositives + $no_falsenegatives) ? $no_detectedtruepositives/($no_detectedtruepositives+$no_falsenegatives) : 'NA';
+    my $recall = ($recallval eq 'NA' ) ? $recallval : sprintf("%5.2f", 100*$recallval);
     print $output_fh "Recall (DTP/(DTP+FN)): $recall\%\n";
     print $output_fh "\n";
     print $output_fh "PRECISION:\n";
     print $output_fh "Number of predictions that are true (PTP): $no_truepositives\n";
     print $output_fh "Number of false positives (FP): $no_falsepositives\n";
-    my $precisionval = ($no_truepositives+$no_falsepositives) ? $no_truepositives/($no_truepositives+$no_falsepositives) : 'NaN';
-    my $precision = ($precisionval eq 'NaN' ) ? $precisionval : sprintf("%5.2f", 100*$precisionval);
+    my $precisionval = ($no_truepositives+$no_falsepositives) ? $no_truepositives/($no_truepositives+$no_falsepositives) : 'NA';
+    my $precision = ($precisionval eq 'NA' ) ? $precisionval : sprintf("%5.2f", 100*$precisionval);
     print $output_fh "Precision (PTP/(PTP+FP)): $precision\%\n";
     print $output_fh "\n";
-    my $f1score = ($recallval ne 'NaN' && $precisionval ne 'NaN' && $recallval + $precisionval > 0) ? 2*$recallval*$precisionval/($recallval+$precisionval) : 'NaN';
+    my $f1score = ($recallval ne 'NA' && $precisionval ne 'NA' && $recallval + $precisionval > 0) ? 2*$recallval*$precisionval/($recallval+$precisionval) : 'NA';
     print $output_fh "F1 (2*Recall*Precision/(Recall+Precision): $f1score\n";
 }
 
@@ -545,29 +503,6 @@ sub retrieve_variant_size {
     return $varsize;
 
 }
-
-sub retrieve_read_counts {
-    my @vcf_fields = @_;
-
-    my ($variant_reads, $reference_reads);
-
-    if ($vcf_fields[8] && $vcf_fields[9]) {
-        my @format_fields = split /:/, $vcf_fields[8];
-        my %field_indices = map { $format_fields[$_] => $_ } (0 .. $#format_fields);
-        my $ref_read_index = $field_indices{'DR'};
-        my $var_read_index = $field_indices{'DV'};
-        my @genotype_values = split /:/, $vcf_fields[9];
-        if (defined($ref_read_index)) {
-            $reference_reads = $genotype_values[$ref_read_index];
-        }
-        if (defined($var_read_index)) {
-            $variant_reads = $genotype_values[$var_read_index];
-        }
-    }
-
-    return ($variant_reads, $reference_reads);
-}
-
 
 __END__
 
@@ -601,20 +536,6 @@ calculations of recall/sensitivity, this minimum is applied to the size of the
 "true" variant. In calculations of precision, this minimum is applied to the
 size of the test variant.
 
-=item B<--minreadsupport <minimum number of variant reads>>
-
-Required minimum number of variant reads reported in a test variant's first
-genotype "DV" FORMAT field for that test variant to be included in the benchmark
-comparison. This FORMAT field is typically included by Fritz Sedlazeck's Sniffles 
-caller.
-
-=item B<--minreadfrac <minimum fraction of variant reads (out of total)>>
-
-Required minimum fraction of variant reads reported in a test variant's first
-genotype "DV" and "DR" FORMAT fields for a test variant to be included in the benchmark
-comparison. The fraction is the number of variant reads divided by the total of reference
-and variant reads.
-
 =item B<--prefix <prefix>>
 
 Prefix to be used in the naming of all output files. A directory name can be
@@ -644,7 +565,7 @@ Maximum allowable normalized shift between matching test and true variants.
 
 Maximum allowable normalized size difference between matching test and true variants.
 
-=item B<--normdist <normalized edit distance>>
+=item B<--normsizedist <normalized edit distance>>
 
 Maximum allowable normalized edit distance between matching test and true variants.
 
